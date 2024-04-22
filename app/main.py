@@ -35,8 +35,12 @@ class CryptoSource(StrEnum):
     BINANCE = "binance"
     BYBIT = "bybit"
 
+
+class CryptoHelper:
+    """Вспомогательные методы для получения данных из источников данных."""
+
     @staticmethod
-    def get_url(source: str) -> str:
+    def get_url(source: CryptoSource) -> str:
         """Получить URL источника данных."""
         return {
             CryptoSource.BINANCE: "https://api.binance.com/api/v3/ticker/price",
@@ -44,7 +48,7 @@ class CryptoSource(StrEnum):
         }[source]
 
     @staticmethod
-    def get_result_key(source: str) -> str | None:
+    def get_result_key(source: CryptoSource) -> str | None:
         """Получить ключ результата из источника данных."""
         return {
             CryptoSource.BINANCE: None,
@@ -52,7 +56,7 @@ class CryptoSource(StrEnum):
         }[source]
 
     @staticmethod
-    def get_symbol_key(source: str) -> str:
+    def get_symbol_key(source: CryptoSource) -> str:
         """Получить ключ символа из источника данных."""
         return {
             CryptoSource.BINANCE: "symbol",
@@ -60,12 +64,12 @@ class CryptoSource(StrEnum):
         }[source]
 
     @staticmethod
-    def get_price_key(source: str) -> str:
+    def get_price_key(source: CryptoSource) -> str:
         """Получить ключ цены из источника данных."""
         return {CryptoSource.BINANCE: "price", CryptoSource.BYBIT: "last_price"}[source]
 
     @staticmethod
-    def get_code_key(source: str) -> str:
+    def get_code_key(source: CryptoSource) -> str:
         """Получить ключ кода ответа."""
         return {
             CryptoSource.BINANCE: "code",
@@ -73,7 +77,7 @@ class CryptoSource(StrEnum):
         }[source]
 
     @staticmethod
-    def get_not_found_codes(source: str) -> tuple[int]:
+    def get_not_found_codes(source: CryptoSource) -> tuple[int, ...]:
         """Получить код ответа при отсутствии данных."""
         return {
             CryptoSource.BINANCE: (-1100, -1121),
@@ -86,9 +90,9 @@ def round_numeric_value(value: float | str) -> int:
     return round(float(value))
 
 
-async def get_coin_prices(source: CryptoSource, symbol: str = None) -> dict[str, float] | None:
+async def get_coin_prices(source: CryptoSource, symbol: str | None = None) -> dict[str, int | None]:
     """Получить цены монет из указанного источника данных."""
-    source_url = CryptoSource.get_url(source.value)
+    source_url = CryptoHelper.get_url(source)
 
     params = None
     if symbol:
@@ -104,28 +108,28 @@ async def get_coin_prices(source: CryptoSource, symbol: str = None) -> dict[str,
 
     response_json = response.json()
 
-    result_key = CryptoSource.get_result_key(source.value)
-    price_key = CryptoSource.get_price_key(source.value)
+    result_key = CryptoHelper.get_result_key(source)
+    price_key = CryptoHelper.get_price_key(source)
     if not symbol:
         if result_key:
             response_json = response_json[result_key]
 
-        symbol_key = CryptoSource.get_symbol_key(source.value)
+        symbol_key = CryptoHelper.get_symbol_key(source)
 
         return {item[symbol_key]: round_numeric_value(item[price_key]) for item in response_json}
 
-    code_key = CryptoSource.get_code_key(source.value)
-    not_found_codes = CryptoSource.get_not_found_codes(source.value)
+    code_key = CryptoHelper.get_code_key(source)
+    not_found_codes = CryptoHelper.get_not_found_codes(source)
 
     if response_json.get(code_key) in not_found_codes:
-        return {source.value: None}
+        return {str(source.value): None}
 
     if result_key:
         response_json = response_json[result_key]
         if isinstance(response_json, list):
             response_json = response_json[0]
 
-    return {source.value: round_numeric_value(response_json[price_key])}
+    return {str(source.value): round_numeric_value(response_json[price_key])}
 
 
 def check_service_availability(*replies: Any) -> None:
@@ -137,16 +141,24 @@ def check_service_availability(*replies: Any) -> None:
                 detail="Не удалось получить цены от всех криптовалютных бирж. Попробуйте позже.",
             )
 
+        if isinstance(reply, BaseException):
+            raise HTTPException(
+                status_code=HTTPStatus.INTERNAL_SERVER_ERROR.value,
+                detail="Внутренняя ошибка сервиса. Свяжитесь с службой поддержки.",
+            )
+
 
 @app.get("/prices")
 async def get_prices() -> list[dict[str, Any]]:
     """Получить цены монет на биржах на данный момент времени."""
-    binance_coins, bybit_coins = await asyncio.gather(
+    coins = await asyncio.gather(
         get_coin_prices(CryptoSource.BINANCE), get_coin_prices(CryptoSource.BYBIT), return_exceptions=True
     )
 
-    check_service_availability(binance_coins, bybit_coins)
+    check_service_availability(*coins)
 
+    binance_coins: dict[str, int | None] = coins[0]
+    bybit_coins: dict[str, int | None] = coins[1]
     common_coins = set(binance_coins.keys()) & set(bybit_coins.keys())
     prices = []
     for coin in common_coins:
@@ -169,13 +181,16 @@ async def get_prices() -> list[dict[str, Any]]:
 
 @app.get("/prices/{coin_name}")
 async def get_coin_price(coin_name: str) -> dict[str, Any]:
-    binance_coin, bybit_coin = await asyncio.gather(
+    coins = await asyncio.gather(
         get_coin_prices(CryptoSource.BINANCE, symbol=coin_name),
         get_coin_prices(CryptoSource.BYBIT, coin_name),
         return_exceptions=True,
     )
 
-    check_service_availability(binance_coin, bybit_coin)
+    check_service_availability(*coins)
+
+    binance_coin: dict[str, int | None] = coins[0]
+    bybit_coin: dict[str, int | None] = coins[1]
 
     return {
         "name": coin_name,

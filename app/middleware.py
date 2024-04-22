@@ -6,7 +6,7 @@ import logging
 import random
 import string
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from fastapi import Request
 
@@ -20,7 +20,7 @@ def get_unique_id(size: int = 8) -> str:
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=size))
 
 
-async def log_requests(request: Request, func: Callable) -> Awaitable[Any]:
+async def log_requests(request: Request, func: Callable) -> Any:  # type: ignore
     """Промежуточный слой для логирование запроса."""
     uid = get_unique_id()
     logger.info(f"START:path={request.url.path};rid={uid}")

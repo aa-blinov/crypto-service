@@ -8,10 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Настройки."""
 
-    model_config = SettingsConfigDict(
-        env_file="service.env",
-        env_file_encoding="utf-8"
-    )
+    model_config = SettingsConfigDict(env_file="service.env", env_file_encoding="utf-8")
 
     API_TITLE: str
     API_DESCRIPTION: str
@@ -20,4 +17,4 @@ class Settings(BaseSettings):
     DEBUG: bool
 
 
-settings = Settings()
+settings = Settings()  # type: ignore
